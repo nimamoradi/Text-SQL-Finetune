@@ -1,2 +1,5 @@
 grain
 python-dotenv
+jax
+flax
+gemma
