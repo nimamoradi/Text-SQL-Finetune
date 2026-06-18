@@ -3,3 +3,10 @@ python-dotenv
 jax
 flax
 gemma
+sql-compare
+sqlparse
+tunix
+optax
+kagglehub
+matplotlib
+tqdm
