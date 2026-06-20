@@ -1,6 +1,7 @@
 from src.data_loading.table_extractor import get_create_table_blocks, get_sqlite_schemas
 from src.data_loading.utils import load_json_files, SPIDER_PATH
 import os
+from tqdm import tqdm
 
 class JsonDataSource:
     def __init__(self, json_paths, keep_fields=("db_id", "query", "question")):
@@ -45,6 +46,25 @@ class JsonDataSource:
         self.records = [
             record for record in self.records if len(self._create_prompt(record)) <= max_len
         ]
+
+    def filter_by_token_length(self, tokenizer, max_len):
+        """Filters the records in-place based on the tokenized prompt length."""
+        if not hasattr(tokenizer, 'encode_as_ids') or not callable(tokenizer.encode_as_ids):
+            raise ValueError("Tokenizer must have an 'encode_as_ids' method.")
+        if not isinstance(max_len, int) or max_len <= 0:
+            return
+
+        initial_count = len(self.records)
+        
+        # This can be slow, so we show progress
+        self.records = [
+            record for record in tqdm(self.records, desc="Filtering by token length") 
+            if len(tokenizer.encode_as_ids(self._create_prompt(record))) <= max_len
+        ]
+        
+        final_count = len(self.records)
+        print(f"Filtered from {initial_count} to {final_count} records (kept {final_count / initial_count:.2%}).")
+
 
     def __len__(self):
         return len(self.records)
