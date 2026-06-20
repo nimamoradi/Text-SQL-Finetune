@@ -76,7 +76,10 @@ class LLMModuleFactory:
         if config.include_tokenizer:
             logger.info("Loading tokenizer")
             if config.tokenizer_path:
-                modules.tokenizer = tokenizer_adapter.Tokenizer(tokenizer_path=config.tokenizer_path)
+                modules.tokenizer = tokenizer_adapter.Tokenizer(
+                    tokenizer_path=config.tokenizer_path,
+                    add_eos=False
+                )
             else:
                 raise ValueError("tokenizer_path is required for the Tunix tokenizer")
             logger.info("Tokenizer loaded ✓")
