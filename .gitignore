@@ -1,3 +1,10 @@
 /spider_data/
 /.idea/
 .env
+checkpoints/
+*.pyc
+models/
+*.log
+*.zip
+/.*
+!.gitignore
