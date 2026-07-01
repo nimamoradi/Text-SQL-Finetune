@@ -10,7 +10,7 @@ class JsonDataSource:
         self.db_schemas = {}
 
         # Pre-load all schemas into memory to keep __getitem__ fast and stateless
-        spider_path = os.environ[SPIDER_PATH]
+        spider_path = os.environ.get(SPIDER_PATH)
         if spider_path is None:
             raise Exception("SPIDER_PATH environment variable not set")
         for raw in self.records:
@@ -33,8 +33,9 @@ class JsonDataSource:
         # Format the prompt
         return (
             f"<start_of_turn>user\n"
-            f"You are a SQL expert. Based on this schema:\n{schema}\n\n"
+            f"Based on this schema:\n{schema}\n\n"
             f"Write a SQL query to answer this question: {question}\n"
+            f"using an sql.\n"
             f"<end_of_turn>\n<start_of_turn>model\n"
         )
 
