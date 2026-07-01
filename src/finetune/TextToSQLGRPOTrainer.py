@@ -18,11 +18,11 @@ from src.model_loading.llm_factory import LLMModuleFactory, LLMFactoryConfig
 class TextToSQLGRPOTrainer:
     def __init__(
             self,
-            learning_rate: float = 1e-5,
-            batch_size: int = 4,
-            num_generations: int = 4,
-            beta: float = 0.08,
-            lora_rank: int = 16,
+            learning_rate: float,
+            batch_size: int,
+            num_generations: int,
+            beta: float,
+            lora_rank: int,
             checkpoint_dir: str = "./checkpoints",
     ):
         self.learning_rate = learning_rate
@@ -30,7 +30,7 @@ class TextToSQLGRPOTrainer:
         self.num_generations = num_generations
         self.beta = beta
         self.lora_rank = lora_rank
-        self.checkpoint_dir = checkpoint_dir
+        self.checkpoint_dir = os.path.abspath(checkpoint_dir)
 
         self.base_model = None
         self.actor_model = None
@@ -66,8 +66,7 @@ class TextToSQLGRPOTrainer:
         """Wraps the base NNX model with LoRA adapters."""
         lora_provider = qwix.LoraProvider(
             module_path=(
-                ".*q_einsum|.*kv_einsum.*gate_proj|.*down_proj|.*up_proj|"
-                ".*attn_vec_einsum"
+                ".*q_einsum|.*kv_einsum"
             ),
             rank=self.lora_rank,
             alpha=float(self.lora_rank),
@@ -85,14 +84,6 @@ class TextToSQLGRPOTrainer:
             sharded_state = jax.lax.with_sharding_constraint(state, pspecs)
             nnx.update(self.actor_model, sharded_state)
 
-    def setup_data_pipeline(self, json_source):
-        self.data_loader = grain.load(
-            json_source,
-            shuffle=True,
-            seed=42,
-            batch_size=self.batch_size,
-            worker_count=0,
-        )
 
     def add_reward_function(self, func):
         self.reward_functions.append(func)
@@ -103,12 +94,37 @@ class TextToSQLGRPOTrainer:
         tok = getattr(self.modules, "tokenizer", None)
         if tok is None:
             return [1]
+        
+        eos_tokens = []
         if hasattr(tok, "eos_token_id") and tok.eos_token_id is not None:
-            return [tok.eos_token_id]
+            eos_tokens.append(tok.eos_token_id)
+        
         eos_method = getattr(tok, "eos_id", None)
         if callable(eos_method):
-            return [eos_method()]
-        return [1]
+            eos_val = eos_method()
+            if eos_val not in eos_tokens:
+                eos_tokens.append(eos_val)
+                
+        if not eos_tokens:
+            eos_tokens = [1]
+            
+        # Dynamically append '<end_of_turn>' token ID for Gemma models
+        if hasattr(tok, "piece_to_id"):
+            try:
+                eot_id = tok.piece_to_id("<end_of_turn>")
+                if eot_id > 3 and eot_id not in eos_tokens:
+                    eos_tokens.append(eot_id)
+            except Exception:
+                pass
+        elif hasattr(tok, "convert_tokens_to_ids"):
+            try:
+                eot_id = tok.convert_tokens_to_ids("<end_of_turn>")
+                if eot_id is not None and eot_id not in eos_tokens:
+                    eos_tokens.append(eot_id)
+            except Exception:
+                pass
+                
+        return eos_tokens
 
     def train(self, steps: int):
         if (
@@ -162,8 +178,8 @@ class TextToSQLGRPOTrainer:
 
         rollout_config = base_rollout.RolloutConfig(
             max_tokens_to_generate=256,
-            max_prompt_length=1536,
-            kv_cache_size=1800,
+            max_prompt_length=1060,
+            kv_cache_size=1060 + 256,
             temperature=0.9,
             top_p=0.9,
             top_k=40,
@@ -177,7 +193,7 @@ class TextToSQLGRPOTrainer:
                 rl_cluster_lib.Role.REFERENCE: mesh,
                 rl_cluster_lib.Role.ROLLOUT: mesh,
             },
-            rollout_engine="vanilla",
+            rollout_engine="vllm",
             offload_to_cpu=False,
             training_config=training_config,
             rollout_config=rollout_config,
@@ -194,7 +210,7 @@ class TextToSQLGRPOTrainer:
         # 6. Instantiate Node Topology Cluster
         cluster = rl_cluster_lib.RLCluster(
             actor=self.actor_model,  # LoRA Policy Model
-            reference=self.actor_model,  # Frozen Base Model or actor for no kl penalty
+            reference=self.base_model,  # Frozen Base Model
             tokenizer=self.modules.tokenizer,
             cluster_config=cluster_config,
         )
@@ -235,9 +251,13 @@ class TextToSQLGRPOTrainer:
 
     def load_checkpoint(self, step: int = None):
         """Restore only the LoRA params into the Actor model if a checkpoint exists."""
+        if step is not None and step not in self.ckpt_manager.all_steps():
+            raise ValueError(f"Requested checkpoint step {step} not found. Available steps: {list(self.ckpt_manager.all_steps())}")
+            
         target_step = step if step is not None else self.ckpt_manager.latest_step()
 
-        if target_step is None or target_step not in self.ckpt_manager.all_steps():
+        if target_step is None:
+            print("No checkpoints found. Using base weights.")
             return
 
         print(f"Restoring LoRA checkpoint from step {target_step}...")
@@ -251,7 +271,7 @@ class TextToSQLGRPOTrainer:
         # 2. Restore the state from disk
         restored_lora_state = self.ckpt_manager.restore(
             target_step,
-            args=ocp.args.StandardRestore(target=target_state),
+            args=ocp.args.StandardRestore(item=target_state),
         )
 
         # 3. Update the running model with the restored LoRA state
