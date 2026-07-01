@@ -57,7 +57,7 @@ def create_dataloaders(train_source, dev_source, test_source, tokenizer=None, ma
         shuffle=True,
         seed=42,
         batch_size=32,
-        worker_count=0,
+        worker_count=4,
     )
 
     dev_loader = grain.load(
@@ -65,7 +65,7 @@ def create_dataloaders(train_source, dev_source, test_source, tokenizer=None, ma
         num_epochs=1,  # Single pass for evaluation
         shuffle=False,
         batch_size=1,
-        worker_count=0,
+        worker_count=4,
     )
 
     test_loader = grain.load(
@@ -73,7 +73,7 @@ def create_dataloaders(train_source, dev_source, test_source, tokenizer=None, ma
         num_epochs=1,
         shuffle=False,
         batch_size=32,
-        worker_count=0,
+        worker_count=4,
     )
 
     return train_loader, dev_loader, test_loader
