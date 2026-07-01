@@ -10,3 +10,6 @@ optax
 kagglehub
 matplotlib
 tqdm
+sentencepiece
+array-record<0.8
+jax-mps; sys_platform == "darwin"
